@@ -1,3 +1,3 @@
-这个代码仅包含Python Code，用于315服务器，Ubuntu系统，Python 2.7，无另外加速
-精简代码至只包含有与Moments Algorithm相关的函数，去除Algorithm related to Master Equation
-2018/04/06 last modified
+这个代码仅包含Python Code，于Dell laptop 测试使用，Windows系统，Python 3.6(Anaconda 3)，无另外加速
+，simulation 可以进行MFE计算，并兼容multi-population计算
+2018/05/17 last modified
