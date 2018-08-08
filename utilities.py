@@ -29,22 +29,22 @@ def rho_EQ(Vs,D,V):
     tmpg = np.greater(V,vR)
     indp = (np.where(tmpg))
     sqrtD  = np.sqrt(D)
-
-
-    intovT  = special.dawsn((vT-Vs)/sqrtD)*np.exp(np.square(vT-Vs)/D)
-    intovSD = special.dawsn(-Vs/sqrtD)*np.exp(np.square(Vs)/D)
-
-
-    Rv[indp] = -special.dawsn((V[indp]-Vs)/sqrtD)+np.exp(-np.square(V[indp]-Vs)/D)*intovT
-    if(indp[0][0]>1):
-        Rv[0:indp[0][0]] = np.exp(-np.square(V[0:indp[0][0]]-Vs)/D)*(-intovSD + intovT)
-
-    tmpl = np.less(V,-2.0/3.0)
-    indp = np.where(tmpl)
-    Rv[indp] = 0.0
-    sum_c = (V[2]-V[1])*np.sum(Rv)
-
-    Rv = Rv/sum_c
+    np.seterr(all='ignore')
+    try:
+        intovT  = special.dawsn((vT-Vs)/sqrtD)*np.exp((vT-Vs)**2/D)
+        intovSD = special.dawsn(-Vs/sqrtD)*np.exp(Vs**2/D)
+        Rv[indp[0][:]] = -special.dawsn((V[indp[0][:]]-Vs)/sqrtD)+np.exp(-(V[indp[0][:]]-Vs)**2/D)*intovT
+        
+        if(indp[0][0]>1):
+            Rv[0:indp[0][0]] = np.exp(-np.square(V[0:indp[0][0]]-Vs)/D)*(-intovSD + intovT)
+        tmpl = np.less(V,-2.0/3.0)
+        indp = np.where(tmpl)
+        Rv[indp[0][:]] = 0.0  
+        sum_c = (V[2]-V[1])*np.sum(Rv)
+        Rv = Rv/sum_c
+    except:
+        sum_c = (V[2]-V[1])*np.sum(Rv)
+        Rv = Rv/sum_c        
     return (Rv,sum_c)
 
 def optfun(lambda_u,mu,x,Pq,fin,gamma):
@@ -62,7 +62,8 @@ def optfun(lambda_u,mu,x,Pq,fin,gamma):
     N  =np.size(lambda_u)
     # print N,np.shape(fin)
     
-    p  = Pq*np.exp(np.dot(fin[:,0:N],lambda_u))
+    p  = Pq*np.exp(np.dot(fin[:,0:N],lambda_u), dtype=np.float64)
+    #print('lambda_u:,',np.sum(np.exp(np.dot(fin[:,0:N],lambda_u))))
     f  = dx*np.sum(p)-np.dot(np.reshape(tt,[1,k+1]),lambda_u)   
     # print 'f: ',f
     return f
@@ -163,14 +164,18 @@ def getMFE_ifdyn(verbose,VE,VI,DEE,DEI,DIE,DII,DEY,DIY,pop_idx_E,pop_idx_I):
     iter = 0
     while (max(np.squeeze(total_V_to_add_to_E)) >0)|(max(np.squeeze(total_V_to_add_to_I)) >0):
         iter+=1
-        print('loop:',iter)
+        #print('loop:',iter)
         #print(VE[E_remaining])
         possible_E_spikes = np.where(VE[E_remaining]>=(VT - np.squeeze(total_V_to_add_to_E[E_remaining])))
-        max_E,ind_E = max(VE[E_remaining]),np.argmax(VE[E_remaining])
-        ind_E = E_remaining[ind_E]
         possible_I_spikes = np.where(VI[I_remaining]>=(VT - np.squeeze(total_V_to_add_to_I[I_remaining])))
-        max_I,ind_I = max(VI[I_remaining]),np.argmax(VI[I_remaining])
-        ind_I = I_remaining[ind_I]
+        ce = np.shape(possible_E_spikes)[1]
+        ci = np.shape(possible_I_spikes)[1]
+        if (ce>0):          
+            max_E,ind_E = max(VE[E_remaining]),np.argmax(VE[E_remaining])
+            ind_E = E_remaining[ind_E]
+        if(ci>0):
+            max_I,ind_I = max(VI[I_remaining]),np.argmax(VI[I_remaining])
+            ind_I = I_remaining[ind_I]
         
 #        print('137 pe:',possible_E_spikes)
 #        print('137 max_E:',max_E)
@@ -180,8 +185,7 @@ def getMFE_ifdyn(verbose,VE,VI,DEE,DEI,DIE,DII,DEY,DIY,pop_idx_E,pop_idx_I):
 #        print('137 max_I:',max_I)
 #        print('137 ind_I:',ind_I)
         
-        ce = np.shape(possible_E_spikes)[1]
-        ci = np.shape(possible_I_spikes)[1]
+
         #print(ce,':',total_V_to_add_to_E[E_remaining])
         #print(ci,':',total_V_to_add_to_I[I_remaining])
         if((ce<1) & (ci<1)):
@@ -252,8 +256,8 @@ def getMFE_ifdyn(verbose,VE,VI,DEE,DEI,DIE,DII,DEY,DIY,pop_idx_E,pop_idx_I):
                     temp_E_cross    = use_voltage_target_E[idxE] - temp_E_residual
                     temp_E_ratio    = temp_E_cross/use_voltage_target_E[idxE]
                     temp_E_ratio_check = 1.0 - temp_E_residual/use_voltage_target_E[idxE]
-                    if temp_E_ratio!= temp_E_ratio_check:
-                        print('Excitatory ratio mismatch! a: ',temp_E_ratio,' b: ',temp_E_ratio_check)
+#                    if temp_E_ratio!= temp_E_ratio_check:
+#                        print('Excitatory ratio mismatch! a: ',temp_E_ratio,' b: ',temp_E_ratio_check)
                     new_could_use_add_E = idxE + temp_E_ratio
                     break
 
@@ -271,8 +275,8 @@ def getMFE_ifdyn(verbose,VE,VI,DEE,DEI,DIE,DII,DEY,DIY,pop_idx_E,pop_idx_I):
                     temp_I_cross = use_voltage_target_I[idxI] - temp_I_residual
                     temp_I_ratio = temp_I_cross/use_voltage_target_I[idxI]
                     temp_I_ratio_check = 1.0 - temp_I_residual/use_voltage_target_I[idxI]
-                    if temp_I_ratio!=temp_I_ratio_check:
-                        print('Inhibitory ratio mismatch! a: ',temp_I_ratio,' b: ',temp_I_ratio_check)
+#                    if temp_I_ratio!=temp_I_ratio_check:
+#                        print('Inhibitory ratio mismatch! a: ',temp_I_ratio,' b: ',temp_I_ratio_check)
                     new_could_use_add_I = idxI + temp_I_ratio
                     break
             #print('233 ratio:',new_could_use_add_E,new_could_use_add_I)
@@ -323,26 +327,32 @@ def getMFE_ifdyn(verbose,VE,VI,DEE,DEI,DIE,DII,DEY,DIY,pop_idx_E,pop_idx_I):
                 VE[E_remaining] = VE[E_remaining] - np.squeeze(DEI[target_E_remaining,type_I]) + np.squeeze(V_to_add_to_E[E_remaining])
                 VI[I_remaining] = VI[I_remaining] - np.squeeze(DII[target_I_remaining,type_I]) + V_to_add_to_I*np.ones_like(VI[I_remaining])
 
+
     VE,VI = np.reshape(VE,(NE*NPATCH,1)),np.reshape(VI,(NI*NPATCH,1))
-    print('fired inh',np.size(I_fired),' exc:',np.size(E_fired))
+    #print('fired inh',np.size(I_fired),' exc:',np.size(E_fired))
     E_fired,I_fired = np.reshape(E_fired,(np.size(E_fired),1)),np.reshape(I_fired,(np.size(I_fired),1))
     ncurrE,ncurrI = len(VE),len(VI)
-    VE_pre,VI_pre = VE,VI 
+    VE_pre,VI_pre = VE.copy(),VI.copy()
     VE_pre[ncurrE-LE:,0] = 1.0
+#    print('VE-pre 0',VE_pre)
     VI_pre[ncurrI-LI:,0] = 1.0
+    
 
-    VE_pos,VI_pos = VE,VI 
+    VE_pos,VI_pos = VE.copy(),VI.copy()
     VE_pos[ncurrE-LE:,0] = 0.0
     VI_pos[ncurrI-LI:,0] = 0.0
 
     E_fired,I_fired = VEj[E_fired], VIj[I_fired]
+#    print('VE-pre 1',VE_pre)
     VE_pre,VI_pre = VE_pre[VEr],VI_pre[VIr]
+#    print('VE-pre 2',VE_pre)
     VE_pos,VI_pos = VE_pos[VEr],VI_pos[VIr]
 
     pop_idx_E_col,pop_idx_I_col = pop_idx_E[VEr],pop_idx_I[VIr]
 
     VE_pre = np.reshape(VE_pre,(NPATCH,NE))
     VE_pre = VE_pre.T
+    
     VI_pre = np.reshape(VI_pre,(NPATCH,NI))
     VI_pre = VI_pre.T
     VE_pos = np.reshape(VE_pos,(NPATCH,NE))

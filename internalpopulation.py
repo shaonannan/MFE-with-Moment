@@ -10,8 +10,7 @@ Last modified 2018/04/06
 import numpy as np
 import utilities as util
 from scipy.optimize import minimize
-from scipy import special
-import time
+
 
 
 """
@@ -26,7 +25,6 @@ other neurons/internal-populations in primary visual cortex.
 class RecurrentPopulation(object):
     """
     Parameters:
-    tau_m: time constant for membrane potential
     v_min: minimum voltage(default = -1.0)
     v_th/max: maximum/threshold 
     dv   : voltage domain discritization 
@@ -36,7 +34,7 @@ class RecurrentPopulation(object):
     
     """
     
-    def __init__(self,tau_m = 20.0,dt = 0.1,v_min = -1.0,v_max = 1.0,dv = 1e-2,record = True,
+    def __init__(self,tau_m = 20.0,dt = 0.1,v_min = -1.0,v_max = 1.0,dv = 1e-3,record = True,
                 firing_rate = 0.0,update_method = 'exact',approx_order = None,tol = 1e-12,norm = np.inf,
                 hyp_idx = 0,ei_pop = 'e', NumCell = 0, **kwargs):
         # transmit parameters
@@ -78,6 +76,7 @@ class RecurrentPopulation(object):
         # so it naturally has this property(without self.weights)
         self.hnmda = 0.0
         self.inmda = 0.0
+        self.acm_NMDA, self.acm_HNMDA = 0,0
 
         self.v1 = 0.0
         self.v2 = 0.0
@@ -92,7 +91,7 @@ class RecurrentPopulation(object):
 
         # for long-range connections
         self.tau_r = 2.0
-        self.tau_d = 108.0
+        self.tau_d = 128.0
         
         self.vpeak = 0.0
     def initialize(self):
@@ -147,10 +146,11 @@ class RecurrentPopulation(object):
                     # tmp_nmda_h = self.tmp_HNMDA_dict.setdefault(c.connection_distribution,0)
                     # tmp_nmda_i = self.tmp_INMDA_dict.setdefault(c.connection_distribution,0)
 
-                    curr_nmda_i = self.total_fpmu_dict.setdefault(c.connection_distribution,0)
+#                    curr_nmda_i = self.total_fpmu_dict.setdefault(c.connection_distribution,0)
 
-                self.total_fpmu_dict[c.connection_distribution]  = curr_nmda_i + c.curr_Inmda *  c.nsyn * c.weights
-                self.total_Inmda_dict[c.connection_distribution] = curr_nmda_i + c.curr_Inmda * c.nsyn * c.weights
+#                self.total_fpmu_dict[c.connection_distribution]  = curr_nmda_i + c.curr_Inmda *  c.nsyn * c.weights
+#                self.total_Inmda_dict[c.connection_distribution] = curr_nmda_i + c.curr_Inmda * c.nsyn * c.weights
+                self.total_Inmda_dict[c.connection_distribution] = 0.0 + c.curr_Inmda * c.nsyn * c.weights
                 # no contribution to sigma
             
         # summation
@@ -160,7 +160,7 @@ class RecurrentPopulation(object):
             
             try:
                 self.total_fp_vslave += val
-            except:
+            except: 
                 key.initialize()              
                 self.total_fp_vslave += val
         self.total_fp_vslave  = self.total_fp_vslave * self.tau_m
@@ -196,9 +196,10 @@ class RecurrentPopulation(object):
         h = vedges[2]-vedges[1]
         vedges = 0.5*(vedges[0:-1] + vedges[1:])
         
-        var1   = np.power((5/2.0/250.0),2)
+        var1   = np.power((5/3.0/250.0),2)
         source = np.exp(-np.square(vedges-0.0)/var1/2.0)/np.sqrt(2.0*np.pi*var1)
-        source = source/(h*np.sum(source))
+        source = source/(h*np.sum(np.squeeze(source)))
+        self.source = source 
         self.rhov = source
         rhovs = self.rhov
         
@@ -283,7 +284,7 @@ class RecurrentPopulation(object):
         cst  = 1.0/(tdamp - trise)*(etd - etr) # trise/(tdamp - trise)*(etd - etr)
 
         self.inmda = self.inmda * etd + self.hnmda * cst
-        self.hnmda = self.hnmda * etr + ownfr * self.dt  * 6.0 # * trise
+        self.hnmda = self.hnmda * etr + ownfr #* self.dt  * 1.0 # * trise
         # print 'ownfr:  ',ownfr
 
 
@@ -304,27 +305,59 @@ class RecurrentPopulation(object):
             in case not to be distubed by previous result
             """
         # have already clear up all the short range connections
-        for c in self.source_connection_list:
+        
+        # parameters
+        deltat = self.dt
+        trise  = self.tau_r
+        tdamp  = self.tau_d
+
+        tr   = deltat/trise
+        etr  = np.exp(-tr)
+        td   = deltat/tdamp
+        etd  = np.exp(-td)
+        cst  = 1.0/(tdamp - trise)*(etd - etr) 
+        ''' accumulated NMDA synaptic current '''
+        accumulated_NMDA  = self.acm_NMDA
+        accumulated_HNMDA = self.acm_HNMDA 
+        tt_HNMDA          = 0
+        for c in self.source_connection_list:          
             if(c.conn_type == 'ShortRange'):
                 self.total_fpmu_dict[c.connection_distribution]  += c.curr_firing_rate * c.nsyn * c.weights
                 # print 'AMPA: ',c.curr_firing_rate * c.nsyn * c.weights
             else:
-                self.total_fpmu_dict[c.connection_distribution]  += c.curr_Inmda * c.nsyn * c.weights
+#                self.total_fpmu_dict[c.connection_distribution]  += c.curr_Inmda * c.nsyn * c.weights
                 self.total_Inmda_dict[c.connection_distribution] += c.curr_Inmda * c.nsyn * c.weights
-                # print 'NMDA: ',c.curr_Inmda * c.nsyn * c.weights
+                tt_HNMDA += c.curr_firing_rate * c.nsyn * c.weights #* self.dt  
+                
 
+        accumulated_NMDA  = accumulated_NMDA  * etd + accumulated_HNMDA * cst
+        accumulated_HNMDA = accumulated_HNMDA * etr + tt_HNMDA * self.tau_m
+        ''' RECORD '''
+        self.acm_NMDA  = accumulated_NMDA
+        self.acm_HNMDA = accumulated_HNMDA
+        
+                
 
 
         # summation
         self.total_fp_vslave = 0.0
-        for key,val in self.total_fpmu_dict.items():
-            
+        for key,val in self.total_fpmu_dict.items():           
             try:
                 self.total_fp_vslave += val
             except:
                 key.initialize()
                 self.total_fp_vslave += val
-        self.total_fp_vslave = self.total_fp_vslave * self.tau_m
+        self.total_fp_vslave = self.total_fp_vslave * self.tau_m + self.acm_NMDA
+        '''
+        '''
+        tinteger = np.round(self.simulation.t/self.dt)
+        if np.mod(tinteger,100)==0:
+            print('time : ',self.simulation.t)
+            if self.ei_pop =='e':
+                print('EXC total vslave: ',self.total_fp_vslave,'; acm_NMDA: ',self.acm_NMDA)
+            else:
+                print('INH total vslave: ',self.total_fp_vslave,'; acm_NMDA: ',self.acm_NMDA)
+        
 
         # summation Inmda
         self.total_Inmda = 0.0
@@ -335,7 +368,8 @@ class RecurrentPopulation(object):
                 key.initialize()
                 self.total_Inmda += val
         self.total_Inmda = self.total_Inmda  * self.tau_m
-
+        
+#        print('org NMDA: ',self.total_Inmda,'; new NMDA: ',self.acm_NMDA)
     
     def update_total_fpsig_dict(self):
         """
@@ -424,7 +458,7 @@ class RecurrentPopulation(object):
                     
                     local_pevent *= prob_event                        
                 else:
-                    local_pevent = 1.0
+                    local_pevent *= 1.0
             NE = self.NumCell
             local_pevent = NE *  self.curr_firing_rate * (1-local_pevent) * self.dt 
             self.local_pevent = local_pevent
@@ -459,7 +493,7 @@ class RecurrentPopulation(object):
             self.update_total_fpmu_dict()
             self.update_fp_moment4()
             self.update_rhoEQ()
-            self.update_MFE()
+            #self.update_MFE()
         else:
             self.update_total_fpsig_dict()
             self.update_total_fpmu_dict()
@@ -493,18 +527,28 @@ class RecurrentPopulation(object):
         self.La1 = La1
         
         if self.USUALorMFE:
-            rhov   = rhoEQ*np.exp(np.dot(np.squeeze(fin[:,:]),La0))
+            rhov   = rhoEQ*np.exp(np.dot(np.squeeze(fin[:,:]),La0),dtype=np.float64)
             # normalization
             rhov        = rhov/(h*np.sum(rhov))
             ''' haven't changed anything '''
             sum_rhoEQ   = self.sum_rhoEQ
             ''' MFE didn't recalculate firing rate based on this equation, only base on LE'''
+            
             firing_rate  = gL*np.sqrt(ds)*np.exp(np.sum(La1))/sum_rhoEQ/2.0
+            if np.isnan(firing_rate)|np.isnan(np.sum(rhov)):
+                print('time: ',self.simulation.t,'fr: ',firing_rate,' ds: ', ds,' sumla1:', np.sum(La1),' sumrho: ', sum_rhoEQ)
+                firing_rate = 0.0
+                self.La1 = np.zeros_like(self.La1)
+                self.La0 = np.zeros_like(self.La0)
+                rhov = self.source
+#                rhov     = 1.0/len(vedges) *np.ones_like(self.source)
+#                rhov     = rhov/(h*np.sum(rhov))
+            
             #change self.curr_rhov not in MFE
             self.rhov = rhov
             # before MFE mE = 0
             # after MFE didn't change and mE = 0 still
-            self.firing_rate = firing_rate        
+            self.firing_rate = firing_rate   
 
         max_loc = np.where(self.rhov==np.amax(self.rhov))
         try:
